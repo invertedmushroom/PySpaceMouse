@@ -60,9 +60,9 @@ class DofCallback:
     def __init__(
             self,
             axis: str,
-            callback: Callable[[int], None],
+            callback: Callable[[object, float], None],
             sleep: float = 0.0,
-            callback_minus: Callable[[int], None] = None,
+            callback_minus: Callable[[object, float], None] = None,
             filter: float = 0.0
     ):
         self.axis = axis
@@ -282,7 +282,7 @@ class DeviceSpec(object):
 
         # only call the DoF callback_arr if the specific DoF state actually changed
         if self.dof_callback_arr and dof_changed:
-            # foreach all callbacks (ButtonCallback)
+            # foreach all callbacks (DofCallback)
             for block_dof_callback in self.dof_callback_arr:
                 now = high_acc_clock()
                 axis_name = block_dof_callback.axis
@@ -296,7 +296,7 @@ class DeviceSpec(object):
                         elif axis_val < -block_dof_callback.filter:
                             block_dof_callback.callback_minus(self.tuple_state, axis_val)
                     elif axis_val > block_dof_callback.filter or axis_val < -block_dof_callback.filter:
-                        block_dof_callback.cafllback(self.tuple_state, axis_val)
+                        block_dof_callback.callback(self.tuple_state, axis_val)
                     self.dict_state_last[axis_name] = now
 
         # only call the button callback if the button state actually changed
@@ -834,7 +834,7 @@ def openCfg(config: Config, set_nonblocking_loop: bool = True, device=None, Devi
     """
 
     return open(config.callback, config.dof_callback, config.dof_callback_arr, config.button_callback,
-                config.button_callback_arr, set_nonblocking_loop, device, DeviceNumber)
+                config.button_callback_arr, set_nonblocking_loop, device, None, DeviceNumber)
 
 
 def open(
@@ -876,18 +876,27 @@ def open(
         else:
             raise Exception("No found any connected or supported devices.")
 
+    # Check configuration before proceeding
+    check_config(callback, dof_callback, dof_callback_arr, button_callback, button_callback_arr)
+
     found_devices = []
     hid = Enumeration()
     all_hids = hid.find()
+    
+    # normalize path param if provided
+    if path and isinstance(path, (bytes, bytearray)):
+        try:
+            path = path.decode("utf-8")
+        except Exception:
+            path = str(path)
+
     if all_hids:
         for dev in all_hids:
-            if path:
-                dev.path = path
             spec = device_specs[device]
+            # match vendor/product
             if dev.vendor_id == spec.hid_id[0] and dev.product_id == spec.hid_id[1]:
                 found_devices.append({"Spec": spec, "HIDDevice": dev})
-                print(f"{device} found")
-
+                print(f"{device} found: {dev.path}")
     else:
         print("No HID devices detected")
         return None
@@ -895,38 +904,117 @@ def open(
     if not found_devices:
         print("No supported devices found")
         return None
-    else:
-        if len(found_devices) <= DeviceNumber:
-            DeviceNumber = 0
 
-        if len(found_devices) > DeviceNumber:
-            # Check that the input configuration has the correct components
-            # Raise an exception if it encounters incorrect component.
-            check_config(callback, dof_callback, dof_callback_arr, button_callback, button_callback_arr)
-            # create a copy of the device specification
-            spec = found_devices[DeviceNumber]["Spec"]
-            dev = found_devices[DeviceNumber]["HIDDevice"]
-            new_device = copy.deepcopy(spec)
-            new_device.device = dev
+    # Build candidate list with prioritized selection
+    candidates = _build_candidate_list(found_devices, path, DeviceNumber)
+    
+    # Try each candidate until one successfully opens
+    for entry in candidates:
+        device_obj = _try_open_device(entry, callback, dof_callback, dof_callback_arr, 
+                                     button_callback, button_callback_arr, set_nonblocking_loop)
+        if device_obj:
+            global _active_device
+            _active_device = device_obj
+            return device_obj
 
-            # set the callbacks
-            new_device.callback = callback
-            new_device.dof_callback = dof_callback
-            new_device.dof_callback_arr = dof_callback_arr
-            new_device.button_callback = button_callback
-            new_device.button_callback_arr = button_callback_arr
-            # open the device
-            new_device.open()
-            # set nonblocking/blocking mode
-            new_device.set_nonblocking_loop = set_nonblocking_loop
-            dev.set_nonblocking(set_nonblocking_loop)
-
-            _active_device = new_device
-            return new_device
-
-    print("Unknown error occured.")
+    print("No devices could be opened successfully.")
     return None
 
+def _build_candidate_list(found_devices, path, DeviceNumber):
+    """Build prioritized list of device candidates"""
+    candidates = []
+    
+    # If a path was provided, prefer the device matching that path
+    if path:
+        for fd in found_devices:
+            dev_path = getattr(fd["HIDDevice"], "path", None)
+            if dev_path and (dev_path == path or path in dev_path or dev_path in path):
+                candidates.append(fd)
+                break
+    
+    # Prefer interfaces with usage==0x0008 and usage_page==0x0001
+    preferred = [fd for fd in found_devices 
+                if getattr(fd["HIDDevice"], "usage", None) == 0x0008 
+                and getattr(fd["HIDDevice"], "usage_page", None) == 0x0001]
+    
+    if preferred and not candidates:
+        # pick by DeviceNumber if possible
+        if len(preferred) > DeviceNumber:
+            candidates.append(preferred[DeviceNumber])
+        else:
+            candidates.append(preferred[0])
+    
+    # Add remaining preferred interfaces
+    for p in preferred:
+        if p not in candidates:
+            candidates.append(p)
+    
+    # Add remaining found_devices
+    for fd in found_devices:
+        if fd not in candidates:
+            candidates.append(fd)
+    
+    return candidates
+
+def _try_open_device(entry, callback, dof_callback, dof_callback_arr, 
+                    button_callback, button_callback_arr, set_nonblocking_loop):
+    """Try to open a single device candidate"""
+    spec = entry["Spec"]
+    dev = entry["HIDDevice"]
+    new_device = copy.deepcopy(spec)
+    new_device.device = dev
+
+    # set the callbacks
+    new_device.callback = callback
+    new_device.dof_callback = dof_callback
+    new_device.dof_callback_arr = dof_callback_arr
+    new_device.button_callback = button_callback
+    new_device.button_callback_arr = button_callback_arr
+
+    try:
+        # open the device handle
+        new_device.open()
+    except Exception as e:
+        print(f"Failed to open device at {getattr(dev, 'path', 'unknown')}: {e}")
+        return None
+
+    # Test device with non-blocking read to detect HID backend errors
+    if not _test_device_read(new_device, set_nonblocking_loop):
+        try:
+            new_device.close()
+        except Exception:
+            pass
+        return None
+
+    # Success
+    new_device.set_nonblocking_loop = set_nonblocking_loop
+    print(f"Opened device at {getattr(dev, 'path', 'unknown')}")
+    return new_device
+
+def _test_device_read(new_device, set_nonblocking_loop):
+    """Test device with non-blocking read to detect backend errors"""
+    dev = new_device.device
+    try:
+        # temporarily enable non-blocking for the probe
+        dev.set_nonblocking(True)
+        try:
+            # read the full expected report size to detect backend errors
+            try:
+                probe_len = new_device._DeviceSpec__bytes_to_read
+            except Exception:
+                probe_len = 64
+            _ = dev.read(probe_len)
+        except HIDException as he:
+            # hid backend error (e.g., -1) => this interface is unusable
+            print(f"HID backend error on {getattr(dev, 'path', 'unknown')}: {he}")
+            return False
+        finally:
+            # restore desired nonblocking mode
+            dev.set_nonblocking(set_nonblocking_loop)
+        return True
+    except Exception as e:
+        print(f"Error probing device {getattr(dev, 'path', 'unknown')}: {e}")
+        return False
 
 def check_config(callback=None, dof_callback=None, dof_callback_arr=None, button_callback=None,
                  button_callback_arr=None):
@@ -960,23 +1048,6 @@ def check_button_callback_arr(button_callback_arr: List[ButtonCallback]) -> List
             raise Exception(f"'ButtonCallback[{num}]:callback' is not callable")
     return button_callback_arr
 
-class DofCallback:
-    """Register new DoF callback"""
-
-    def __init__(
-            self,
-            axis: str,
-            callback: Callable[[int], None],
-            sleep: float = 0.0,
-            callback_minus: Callable[[int], None] = None,
-            filter: float = 0.0
-    ):
-        self.axis = axis
-        self.callback = callback
-        self.sleep = sleep
-        self.callback_minus = callback_minus
-        self.filter = filter
-
 def check_dof_callback_arr(dof_callback_arr: List[DofCallback]) -> List[DofCallback]:
     """Check that the dof_callback_arr has the correct components.
     Raise an exception if it encounters incorrect component."""
@@ -985,30 +1056,27 @@ def check_dof_callback_arr(dof_callback_arr: List[DofCallback]) -> List[DofCallb
     for num, dof_call in enumerate(dof_callback_arr):
         if not isinstance(dof_call, DofCallback):
             raise Exception(f"'DofCallback[{num}]' is not instance of 'DofCallback'")
-            # has the correct axis name
+        # has the correct axis name
         if dof_call.axis not in ["x", "y", "z", "roll", "pitch", "yaw"]:
             raise Exception(
                 f"'DofCallback[{num}]:axis' is not string from ['x', 'y', 'z', 'roll', 'pitch', 'yaw']")
 
-            # is callback callable
+        # is callback callable
         if not callable(dof_call.callback):
             raise Exception(f"'DofCallback[{num}]:callback' is not callable")
 
-            # is sleep type float
+        # is sleep type float
         if type(dof_call.sleep) is not float:
             raise Exception(f"'DofCallback[{num}]:sleep' is not type float")
 
-            # is callback_minus callable
-        if not dof_call.callback_minus or not callable(
-            dof_call.callback_minus
-        ):
+        # is callback_minus callable or None (Fixed: allow None)
+        if dof_call.callback_minus is not None and not callable(dof_call.callback_minus):
             raise Exception(f"'DofCallback[{num}]:callback_minus' is not callable")
 
-            # is filter type float
-        if not dof_call.filter or type(dof_call.filter) is not float:
+        # is filter type float (Fixed: removed incorrect check)
+        if type(dof_call.filter) is not float:
             raise Exception(f"'DofCallback[{num}]:filter' is not type float")
     return dof_callback_arr
-
 
 def config_set(config: Config):
     """Set new configuration of mouse from Config class"""
