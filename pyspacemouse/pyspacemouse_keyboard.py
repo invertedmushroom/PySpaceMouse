@@ -227,6 +227,28 @@ def main(device: Optional[str] = None, invert_yaw: bool = True) -> None:
 	ik.bind("pitch_up", keyboard.Key.up, mode="hold")
 	ik.bind("pitch_down", keyboard.Key.down, mode="hold")
 
+	# Button mapping for 15 buttons (indexes 0..14)
+	button_mapping = {
+		0: 'b',                         # Toggle Character Panels (B)
+		1: keyboard.Key.alt_l,          # Show world Tooltips (Left Alt)
+		2: keyboard.Key.ctrl_l,         # Toggle Info (Left Ctrl)
+		3: keyboard.Key.shift_l,        # Show Sneak Cones / Climbing Toggle (Left Shift)
+		4: keyboard.Key.esc,            # Cancel / In-Game Menu (Escape)
+		5: 'o',                         # Toggle Tactical Camera (O)
+		6: keyboard.Key.tab,            # Toggle Combat Mode / Party Overview (Tab)
+		7: 'c',                         # Toggle Sneak (C)
+		8: keyboard.Key.space,          # End Turn / Enter Turn-based (Space)
+		9: keyboard.Key.home,           # Camera Center (Home)
+		10: 'm',                        # Toggle Map (M)
+		11: keyboard.Key.f10,           # Toggle Presentation mode (F10)
+		12: 'i',                        # Toggle Inventory (I)
+		13: 'l',                        # Toggle Journal (L)
+		14: (keyboard.Key.shift, keyboard.Key.space),  # Toggle Turn-based Mode (Shift+Space)
+	}
+
+	# Track last button states to detect rising edges
+	prev_buttons = [0] * 15
+
 	last_dir = {
 		"x": 0,
 		"y": 0,
@@ -304,6 +326,35 @@ def main(device: Optional[str] = None, invert_yaw: bool = True) -> None:
 			else:
 				ik.update("pitch_down", abs(pitch), now)
 				ik.update("pitch_up", 0.0, now)
+
+			# Buttons: fire tap on rising edge
+			try:
+				btns = list(getattr(state, 'buttons', []))
+			except Exception:
+				btns = []
+			if btns:
+				# ensure prev_buttons has same length
+				if len(prev_buttons) != len(btns):
+					prev_buttons = [0] * len(btns)
+				for idx, val in enumerate(btns):
+					if val and not prev_buttons[idx]:
+						key = button_mapping.get(idx)
+						if key is not None:
+							try:
+								if isinstance(key, tuple):
+									# Modifier combo: press all, then release in reverse
+									for k in key:
+										kb.press(k)
+									time.sleep(0.005)
+									for k in reversed(key):
+										kb.release(k)
+								else:
+									kb.press(key)
+									time.sleep(0.005)
+									kb.release(key)
+							except Exception:
+								pass
+				prev_buttons = btns
 
 			time.sleep(0.005)
 
