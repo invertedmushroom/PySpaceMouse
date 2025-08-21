@@ -1,32 +1,57 @@
+
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+import os
 
-# ===== User-configurable settings =====
-# Axis inversion flags
-INVERT_X = False         # left/right
-INVERT_Y = True          # forward/back
-INVERT_Z = True          # zoom
-INVERT_YAW = True        # twist/rotate direction
+# Try to load config from YAML file
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'spacemouse_config.yaml')
+_user_config = None
+try:
+	import yaml
+	with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+		_user_config = yaml.safe_load(f)
+except Exception:
+	_user_config = None
 
-# Zoom direction
-SWAP_Y_Z = False
 
-# Movement sensitivity (translation) – pulsed
-MOVE_PRESS_MS = 0.020 # seconds key is held per pulse
-MOVE_MIN_HZ = 15.0
-MOVE_MAX_HZ = 30.0
-MOVE_DEADZONE = 0.001
-MOVE_HOLD_THRESHOLD = 0.40
-MOVE_EMA_ALPHA = 0.3 # smoothing for axis
+# ===== User-configurable settings (from config file if present) =====
 
-# Zoom sensitivity
-ZOOM_PRESS_MS = 0.010
-ZOOM_MIN_HZ = 8.0
-ZOOM_MAX_HZ = 18.0
-ZOOM_DEADZONE = 0.001
-ZOOM_HOLD_THRESHOLD = 0.5    # 1.0 disables hold behavior in pulse mode
-ZOOM_EMA_ALPHA = 0.3
+def _cfg(path, default, typ=None):
+	c = _user_config
+	for p in path.split('.'):
+		if c is None or p not in c:
+			return default
+		c = c[p]
+	if c is None:
+		return default
+	if typ is not None:
+		try:
+			return typ(c)
+		except Exception:
+			return default
+	return c
+
+# Cast to correct type for safety
+INVERT_X = _cfg('invert_x', False, bool)
+INVERT_Y = _cfg('invert_y', True, bool)
+INVERT_Z = _cfg('invert_z', True, bool)
+INVERT_YAW = _cfg('invert_yaw', True, bool)
+SWAP_Y_Z = _cfg('swap_y_z', False, bool)
+
+MOVE_PRESS_MS = _cfg('move.press_ms', 0.020, float)
+MOVE_MIN_HZ = _cfg('move.min_hz', 15.0, float)
+MOVE_MAX_HZ = _cfg('move.max_hz', 30.0, float)
+MOVE_DEADZONE = _cfg('move.deadzone', 0.001, float)
+MOVE_HOLD_THRESHOLD = _cfg('move.hold_threshold', 0.40, float)
+MOVE_EMA_ALPHA = _cfg('move.ema_alpha', 0.3, float)
+
+ZOOM_PRESS_MS = _cfg('zoom.press_ms', 0.010, float)
+ZOOM_MIN_HZ = _cfg('zoom.min_hz', 8.0, float)
+ZOOM_MAX_HZ = _cfg('zoom.max_hz', 18.0, float)
+ZOOM_DEADZONE = _cfg('zoom.deadzone', 0.001, float)
+ZOOM_HOLD_THRESHOLD = _cfg('zoom.hold_threshold', 0.5, float)
+ZOOM_EMA_ALPHA = _cfg('zoom.ema_alpha', 0.3, float)
 # ===== End user-configurable settings =====
 
 # Use the library in this package
@@ -213,38 +238,78 @@ def main(device: Optional[str] = None, invert_yaw: bool = True) -> None:
 		ema_alpha=ZOOM_EMA_ALPHA,
 	)
 
-	# Bind actions to keys
+	# Axis-to-key mapping: load from config if present, else use defaults
+	_default_axis_mapping = {
+		'move_left': 'a',
+		'move_right': 'd',
+		'move_forward': 'w',
+		'move_backward': 's',
+		'zoom_in': 'page_up',
+		'zoom_out': 'page_down',
+		'rotate_left': 'delete',
+		'rotate_right': 'end',
+		'pitch_up': 'up',
+		'pitch_down': 'down',
+	}
+	_cfg_axes = _cfg('axes', None)
+	axis_mapping = {}
+	for k, v in _default_axis_mapping.items():
+		val = _cfg_axes.get(k, v) if _cfg_axes else v
+		# Convert string names to pynput keys if needed
+		axis_mapping[k] = getattr(keyboard.Key, val) if hasattr(keyboard.Key, val) else val
+
 	# translation and zoom: pulse mode
-	ik.bind("move_left", 'a', mode="pulse")
-	ik.bind("move_right", 'd', mode="pulse")
-	ik.bind("move_forward", 'w', mode="pulse")
-	ik.bind("move_backward", 's', mode="pulse")
-	zoom_ik.bind("zoom_in", keyboard.Key.page_up, mode="pulse")
-	zoom_ik.bind("zoom_out", keyboard.Key.page_down, mode="pulse")
+	ik.bind("move_left", axis_mapping['move_left'], mode="pulse")
+	ik.bind("move_right", axis_mapping['move_right'], mode="pulse")
+	ik.bind("move_forward", axis_mapping['move_forward'], mode="pulse")
+	ik.bind("move_backward", axis_mapping['move_backward'], mode="pulse")
+	zoom_ik.bind("zoom_in", axis_mapping['zoom_in'], mode="pulse")
+	zoom_ik.bind("zoom_out", axis_mapping['zoom_out'], mode="pulse")
 	# rotation (twist) and pitch: continuous hold for smooth camera
-	ik.bind("rotate_left", keyboard.Key.delete, mode="hold")
-	ik.bind("rotate_right", keyboard.Key.end, mode="hold")
-	ik.bind("pitch_up", keyboard.Key.up, mode="hold")
-	ik.bind("pitch_down", keyboard.Key.down, mode="hold")
+	ik.bind("rotate_left", axis_mapping['rotate_left'], mode="hold")
+	ik.bind("rotate_right", axis_mapping['rotate_right'], mode="hold")
+	ik.bind("pitch_up", axis_mapping['pitch_up'], mode="hold")
+	ik.bind("pitch_down", axis_mapping['pitch_down'], mode="hold")
 
 	# Button mapping for 15 buttons (indexes 0..14)
-	button_mapping = {
+	# Button mapping: load from config if present, else use defaults
+	_default_button_mapping = {
 		0: 'b',                         # Toggle Character Panels (B)
-		1: keyboard.Key.alt_l,          # Show world Tooltips (Left Alt)
-		2: keyboard.Key.ctrl_l,         # Toggle Info (Left Ctrl)
-		3: keyboard.Key.shift_l,        # Show Sneak Cones / Climbing Toggle (Left Shift)
-		4: keyboard.Key.esc,            # Cancel / In-Game Menu (Escape)
+		1: 'alt_l',                     # Show world Tooltips (Left Alt)
+		2: 'ctrl_l',                    # Toggle Info (Left Ctrl)
+		3: 'shift_l',                   # Show Sneak Cones / Climbing Toggle (Left Shift)
+		4: 'esc',                       # Cancel / In-Game Menu (Escape)
 		5: 'o',                         # Toggle Tactical Camera (O)
-		6: keyboard.Key.tab,            # Toggle Combat Mode / Party Overview (Tab)
+		6: 'tab',                       # Toggle Combat Mode / Party Overview (Tab)
 		7: 'c',                         # Toggle Sneak (C)
-		8: keyboard.Key.space,          # End Turn / Enter Turn-based (Space)
-		9: keyboard.Key.home,           # Camera Center (Home)
+		8: 'space',                     # End Turn / Enter Turn-based (Space)
+		9: 'home',                      # Camera Center (Home)
 		10: 'm',                        # Toggle Map (M)
-		11: keyboard.Key.f10,           # Toggle Presentation mode (F10)
+		11: 'caps_lock',                # 
 		12: 'i',                        # Toggle Inventory (I)
 		13: 'l',                        # Toggle Journal (L)
-		14: (keyboard.Key.shift, keyboard.Key.space),  # Toggle Turn-based Mode (Shift+Space)
+		14: ['shift', 'space'],         # Leave Turn-based Mode (Shift+Space)
 	}
+	# Load from config if present
+	_cfg_buttons = _cfg('buttons', None)
+	button_mapping = {}
+	for idx in range(15):
+		val = None
+		if _cfg_buttons and str(idx) in _cfg_buttons:
+			val = _cfg_buttons[str(idx)]
+		elif _cfg_buttons and idx in _cfg_buttons:
+			val = _cfg_buttons[idx]
+		else:
+			val = _default_button_mapping[idx]
+		# Convert string names to pynput keys if needed
+		if isinstance(val, list):
+			keys = []
+			for v in val:
+				k = getattr(keyboard.Key, v) if hasattr(keyboard.Key, v) else v
+				keys.append(k)
+			button_mapping[idx] = tuple(keys)
+		else:
+			button_mapping[idx] = getattr(keyboard.Key, val) if hasattr(keyboard.Key, val) else val
 
 	# Track last button states to detect rising edges
 	prev_buttons = [0] * 15

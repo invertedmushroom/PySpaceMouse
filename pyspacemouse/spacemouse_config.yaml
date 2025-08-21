@@ -1,0 +1,68 @@
+# ================= SpaceMouse Keyboard Bridge Configuration =================
+# Edit this file to customize all button, axis, and sensitivity settings.
+# Save as 'spacemouse_config.yaml' in the same folder as pyspacemouse_keyboard.py
+#
+# Key names: Use single characters (e.g. 'a', 'w', '1') or pynput.keyboard.Key names (e.g. 'tab', 'esc', 'space', 'shift', 'ctrl_l', 'alt_l', 'page_up', 'page_down', 'delete', 'end', 'up', 'down', 'left', 'right', 'home', 'f10', etc).
+# For combos, use a list, e.g. [shift, space]
+#
+# See https://pynput.readthedocs.io/en/latest/keyboard.html#pynput.keyboard.Key for all special key names.
+# ============================================================================
+
+# Axis inversion and swap
+invert_x: false        # Invert left/right
+invert_y: true         # Invert forward/back
+invert_z: true         # Invert zoom
+invert_yaw: true       # Invert twist/rotate
+swap_y_z: false        # Swap Y and Z axes (move/zoom)
+
+# Sensitivity profiles
+move:
+  press_ms: 0.020      # Pulse duration for move keys (seconds)
+  min_hz: 15.0         # Minimum pulse frequency
+  max_hz: 30.0         # Maximum pulse frequency
+  deadzone: 0.001      # Ignore input below this magnitude
+  hold_threshold: 0.40 # Hold key above this magnitude
+  ema_alpha: 0.3       # Smoothing factor
+zoom:
+  press_ms: 0.010      # Pulse duration for zoom keys (seconds)
+  min_hz: 8.0
+  max_hz: 18.0
+  deadzone: 0.001
+  hold_threshold: 0.5
+  ema_alpha: 0.3
+
+# Axis-to-key mapping
+axes:
+  move_left: a
+  move_right: d
+  move_forward: w
+  move_backward: s
+  zoom_in: page_up
+  zoom_out: page_down
+  rotate_left: delete
+  rotate_right: end
+  pitch_up: up
+  pitch_down: down
+
+# Button mapping (index: key or [modifier, key])
+# Use key names as in pynput.keyboard.Key or a single character string.
+# For combos, use a list, e.g. [shift, space]
+#
+# 0: MENU, 1: ALT, 2: CTRL, 3: SHIFT, 4: ESC, 5: 1, 6: 2, 7: 3, 8: 4, 9: roll arrow, 10: T, 11: rotation lock, 12: F, 13: F, 14: FIT
+buttons:
+  0: b                 # Toggle Character Panels (B)
+  1: alt_l             # Show world Tooltips (Left Alt)
+  2: ctrl_l            # Toggle Info (Left Ctrl)
+  3: shift_l           # Show Sneak Cones / Climbing Toggle (Left Shift)
+  4: esc               # Cancel / In-Game Menu (Escape)
+  5: o                 # Toggle Tactical Camera (O)
+  6: tab               # Toggle Combat Mode / Party Overview (Tab)
+  7: c                 # Toggle Sneak (C)
+  8: space             # End Turn / Enter Turn-based (Space)
+  9: home              # Camera Center (Home)
+  10: m                # Toggle Map (M)
+  11: caps_lock        #
+  12: i                # Toggle Inventory (I)
+  13: l                # Toggle Journal (L)
+  14: [shift, space]   # Leave Turn-based Mode (Shift+Space)
+
