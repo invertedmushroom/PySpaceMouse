@@ -57,6 +57,11 @@ ZOOM_EMA_ALPHA = _cfg('zoom.ema_alpha', 0.3, float)
 MODE_TOGGLE_KEY = _cfg('mode.toggle_key', 'caps_lock')
 MODE_SYNC_WITH_CAPSLOCK_LED = _cfg('mode.sync_with_capslock_led', True, bool)
 MODE_START_IN_CHARACTER_MODE = _cfg('mode.start_in_character_mode', False, bool)
+
+# Mode settings
+MODE_TOGGLE_KEY = _cfg('mode.toggle_key', 'caps_lock')
+MODE_SYNC_WITH_CAPSLOCK_LED = _cfg('mode.sync_with_capslock_led', True, bool)
+MODE_START_IN_CHARACTER_MODE = _cfg('mode.start_in_character_mode', False, bool)
 # ===== End user-configurable settings =====
 
 # Use the library in this package
