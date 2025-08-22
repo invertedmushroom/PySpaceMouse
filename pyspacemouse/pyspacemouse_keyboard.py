@@ -52,6 +52,11 @@ ZOOM_MAX_HZ = _cfg('zoom.max_hz', 18.0, float)
 ZOOM_DEADZONE = _cfg('zoom.deadzone', 0.001, float)
 ZOOM_HOLD_THRESHOLD = _cfg('zoom.hold_threshold', 0.5, float)
 ZOOM_EMA_ALPHA = _cfg('zoom.ema_alpha', 0.3, float)
+
+# Mode settings
+MODE_TOGGLE_KEY = _cfg('mode.toggle_key', 'caps_lock')
+MODE_SYNC_WITH_CAPSLOCK_LED = _cfg('mode.sync_with_capslock_led', True, bool)
+MODE_START_IN_CHARACTER_MODE = _cfg('mode.start_in_character_mode', False, bool)
 # ===== End user-configurable settings =====
 
 # Use the library in this package
@@ -63,6 +68,24 @@ except ImportError as e:
 	raise SystemExit(
 		"Missing dependency: pynput. Install it with 'pip install pynput'"
 	) from e
+
+# CapsLock LED state detection
+try:
+	import ctypes
+	import ctypes.wintypes
+	_capslock_available = True
+except ImportError:
+	_capslock_available = False
+
+def get_capslock_state():
+	"""Get CapsLock LED state on Windows"""
+	if not _capslock_available:
+		return False
+	try:
+		# VK_CAPITAL = 0x14 (CapsLock)
+		return bool(ctypes.windll.user32.GetKeyState(0x14) & 1)
+	except Exception:
+		return False
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -258,18 +281,34 @@ def main(device: Optional[str] = None, invert_yaw: bool = True) -> None:
 		# Convert string names to pynput keys if needed
 		axis_mapping[k] = getattr(keyboard.Key, val) if hasattr(keyboard.Key, val) else val
 
-	# translation and zoom: pulse mode
-	ik.bind("move_left", axis_mapping['move_left'], mode="pulse")
-	ik.bind("move_right", axis_mapping['move_right'], mode="pulse")
-	ik.bind("move_forward", axis_mapping['move_forward'], mode="pulse")
-	ik.bind("move_backward", axis_mapping['move_backward'], mode="pulse")
+	# Mode detection: sync with CapsLock LED or manual toggle
+	character_mode = MODE_START_IN_CHARACTER_MODE
+	if MODE_SYNC_WITH_CAPSLOCK_LED and _capslock_available:
+		character_mode = get_capslock_state()
+	
+	def get_movement_mode():
+		"""Return 'hold' for character mode (BG3WASD), 'pulse' for camera mode"""
+		nonlocal character_mode
+		if MODE_SYNC_WITH_CAPSLOCK_LED and _capslock_available:
+			character_mode = get_capslock_state()
+		return "hold" if character_mode else "pulse"
+
+	# Bind keys with initial mode
+	initial_mode = get_movement_mode()
+	ik.bind("move_left", axis_mapping['move_left'], mode=initial_mode)
+	ik.bind("move_right", axis_mapping['move_right'], mode=initial_mode)
+	ik.bind("move_forward", axis_mapping['move_forward'], mode=initial_mode)
+	ik.bind("move_backward", axis_mapping['move_backward'], mode=initial_mode)
 	zoom_ik.bind("zoom_in", axis_mapping['zoom_in'], mode="pulse")
 	zoom_ik.bind("zoom_out", axis_mapping['zoom_out'], mode="pulse")
-	# rotation (twist) and pitch: continuous hold for smooth camera
+	# rotation (twist) and pitch: always continuous hold for smooth camera
 	ik.bind("rotate_left", axis_mapping['rotate_left'], mode="hold")
 	ik.bind("rotate_right", axis_mapping['rotate_right'], mode="hold")
 	ik.bind("pitch_up", axis_mapping['pitch_up'], mode="hold")
 	ik.bind("pitch_down", axis_mapping['pitch_down'], mode="hold")
+
+	# Track mode changes
+	last_mode = initial_mode
 
 	# Button mapping for 15 buttons (indexes 0..14)
 	# Button mapping: load from config if present, else use defaults
@@ -328,6 +367,20 @@ def main(device: Optional[str] = None, invert_yaw: bool = True) -> None:
 			if not state:
 				time.sleep(0.005)
 				continue
+
+			# Check for mode changes (CapsLock LED sync)
+			current_mode = get_movement_mode()
+			if current_mode != last_mode:
+				# Update movement key modes when CapsLock changes
+				ik.states["move_left"].mode = current_mode
+				ik.states["move_right"].mode = current_mode
+				ik.states["move_forward"].mode = current_mode
+				ik.states["move_backward"].mode = current_mode
+				# Ensure keys are released when switching modes
+				for name in ["move_left", "move_right", "move_forward", "move_backward"]:
+					ik._ensure_released(ik.states[name])
+				last_mode = current_mode
+				print(f"Mode changed to: {'Character (BG3WASD)' if current_mode == 'hold' else 'Camera'}")
 
 			# Read raw axes
 			x = state.x

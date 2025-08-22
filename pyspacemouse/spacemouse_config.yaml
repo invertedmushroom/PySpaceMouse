@@ -17,7 +17,7 @@ swap_y_z: false        # Swap Y and Z axes (move/zoom)
 
 # Sensitivity profiles
 move:
-  press_ms: 0.020      # Pulse duration for move keys (seconds)
+  press_ms: 0.015      # Pulse duration for move keys (seconds)
   min_hz: 15.0         # Minimum pulse frequency
   max_hz: 30.0         # Maximum pulse frequency
   deadzone: 0.001      # Ignore input below this magnitude
@@ -30,6 +30,12 @@ zoom:
   deadzone: 0.001
   hold_threshold: 0.5
   ema_alpha: 0.3
+
+# Mode (camera vs character/WASD)
+mode:
+  toggle_key: caps_lock             # Key that toggles BG3WASD mod
+  sync_with_capslock_led: true      # If true, mirror CapsLock LED state
+  start_in_character_mode: false    # Starting mode if LED sync disabled
 
 # Axis-to-key mapping
 axes:
